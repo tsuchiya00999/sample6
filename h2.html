@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイムナビゲーションマップ (h2機能 + g10レイアウト)</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css" />
+
+    <style>
+        /* (ここから g10.html の CSS) */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        #tilt-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 1;
+        }
+        #tilt-controls button {
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 8px 12px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-size: 16px;
+        }
+        #tilt-controls button:hover {
+            background-color: #f0f0f0;
+        }
+        /* g10.html の tracking-controls のスタイル */
+        #tracking-controls {
+            position: absolute;
+            top: 95px; 
+            right: 10px;
+            z-index: 1;
+        }
+        #tracking-controls button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: none;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-weight: bold;
+        }
+        /* g10.html の permission-controls のスタイル */
+        #permission-controls {
+            position: absolute;
+            top: 150px; 
+            right: 10px;
+            z-index: 1;
+        }
+        #permission-controls button {
+            background-color: #ff9800;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-size: 14px;
+            font-weight: bold;
+        }
+        /* g10.html の nav-panel のスタイル */
+        #nav-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap; 
+            box-sizing: border-box; 
+        }
+        #search-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-grow: 1; 
+            flex-wrap: wrap; 
+        }
+        #destination-input {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            flex-grow: 1; 
+            min-width: 150px; 
+        }
+        #nav-panel button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: none;
+            background-color: #4285F4;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap; 
+        }
+        /* g10.html の route-info のスタイル */
+        #route-info {
+            display: none; 
+            font-size: 14px; 
+            font-weight: bold; 
+            width: 100%; 
+            text-align: center; 
+            margin-top: 5px;
+            color: #333;
+        }
+        /* g10.html の route-slider-container のスタイル */
+        #route-slider-container {
+            position: absolute;
+            bottom: 20px;
+            left: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            padding-bottom: 30px; 
+            border-radius: 8px;
+            z-index: 2;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            display: none; 
+            box-sizing: border-box; 
+        }
+        #slider-info {
+            font-size: 14px; 
+            margin-bottom: 15px; 
+            text-align: center;
+            font-weight: 500;
+        }
+        #route-slider {
+            margin: 0 10px;
+        }
+        /* (ここまで g10.html の CSS) */
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    
+    <div id="tilt-controls">
+        <button id="tilt-up-button">▲</button>
+        <button id="tilt-down-button">▼</button>
+    </div>
+
+    <div id="tracking-controls">
+        <button id="start-tracking-button" style="display: none; background-color: #34A853;">ナビ開始</button>
+    </div>
+
+    <div id="permission-controls">
+         <button id="enable-orientation-button" style="display: none;">コンパス有効化</button>
+    </div>
+
+    <div id="nav-panel">
+        <button id="toggle-search-button">検索</button>
+        <div id="search-controls" style="display: none;"> 
+            <input type="text" id="destination-input" placeholder="目的地を入力または地図をクリック">
+            <button id="start-nav-button">経路検索</button>
+            <button id="clear-route-button" style="background-color: #f44336;">クリア</button>
+            </div>
+        <div id="route-info"></div>
+    </div>
+
+    <div id="route-slider-container">
+        <div id="slider-info">選択範囲: 0分0秒 (0.0 km)</div>
+        <div id="route-slider"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+
+    <script>
+        let map;
+        let directionsService;
+        let directionsRenderer;
+        let currentPositionMarker;
+        let currentLatLng;
+        let geocoder;
+        let destinationMarker;
+        let destinationLatLng = null;
+        let threeDBuildingLayer; 
+
+        let routePath = [];
+        let cumulativeDistances = [];
+        let cumulativeDurations = [];
+        
+        let highlightPolyline;
+        let bluePolyline; 
+        
+        let routeSlider, sliderContainer;
+
+        let apiTotalDurationText = "";
+        let apiTotalDistanceText = "";
+        
+        let isTrackingMode = false;
+        
+        const DEFAULT_TILT = 60;
+        const NAV_TILT = 70; 
+
+        function initMap() {
+            // (h2.html と同じ)
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer();
+            geocoder = new google.maps.Geocoder();
+            
+            const initialPosition = { lat: 35.681236, lng: 139.767125 }; 
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: initialPosition,
+                zoom: 18,
+                tilt: DEFAULT_TILT, 
+                heading: 0,
+                mapId: 'e0361908272b781aef2d6849', 
+                disableDefaultUI: true,
+                gestureHandling: 'greedy'
+            });
+
+            try {
+                if (google && google.maps && typeof google.maps.ThreeDBuildingLayer === 'function') {
+                    threeDBuildingLayer = new google.maps.ThreeDBuildingLayer();
+                    threeDBuildingLayer.setMap(map);
+                } else {
+                    console.warn('ThreeDBuildingLayer is not available in this Maps API build.');
+                }
+            } catch (err) {
+                console.error('Failed to initialize ThreeDBuildingLayer:', err);
+            }
+            
+            directionsRenderer.setOptions({
+                suppressPolylines: true, 
+                suppressMarkers: true,   
+                map: map
+            });
+
+            map.addListener('click', handleMapClick);
+
+            currentPositionMarker = new google.maps.Marker({
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                    scale: 7,
+                    fillColor: '#4285F4',
+                    fillOpacity: 1,
+                    strokeWeight: 2,
+                    strokeColor: 'white',
+                    rotation: 0 
+                }
+            });
+
+            startGeolocationWatcher();
+            setupOrientationControls();
+            setupTiltControls();
+            setupButtons(); 
+            setupSliders();
+        }
+
+        function setupButtons() {
+            // (h2.html と同じ)
+            // (g10 のCSS変更により、#nav-panel の right スタイル操作は不要になるが、
+            //  h2 のロジックのままでも g10 のレイアウトで動作する)
+            const toggleButton = document.getElementById('toggle-search-button');
+            const searchControls = document.getElementById('search-controls');
+            const navPanel = document.getElementById('nav-panel'); 
+            const routeInfo = document.getElementById('route-info'); 
+            toggleButton.addEventListener('click', () => {
+                const isHidden = searchControls.style.display === 'none';
+                if (isHidden) {
+                    searchControls.style.display = 'flex';
+                    toggleButton.textContent = '閉じる';
+                    // g10 の CSS では nav-panel が wrap されるため、
+                    // 以下の 'right' スタイル操作は g10 のレイアウトでは影響しなくなる
+                    navPanel.style.right = '70px'; 
+                    if (routeInfo.textContent) {
+                        routeInfo.style.display = 'block';
+                    }
+                } else {
+                    searchControls.style.display = 'none';
+                    toggleButton.textContent = '検索';
+                    navPanel.style.right = 'auto'; 
+                    routeInfo.style.display = 'none';
+                }
+            });
+            document.getElementById('start-nav-button').addEventListener('click', () => {
+                const destinationQuery = document.getElementById('destination-input').value;
+                if (!currentLatLng) {
+                    alert('現在地が取得できていません。');
+                    return;
+                }
+                const handleDestinationFound = (latLng, title) => {
+                    clearRoute(); 
+                    if (title) {
+                         document.getElementById('destination-input').value = title;
+                    }
+                    destinationMarker = new google.maps.Marker({
+                        position: latLng,
+                        map: map,
+                        title: title || "目的地"
+                    });
+                    displayRouteOnMap(currentLatLng, latLng);
+                };
+                if (destinationLatLng) {
+                    handleDestinationFound(destinationLatLng, document.getElementById('destination-input').value);
+                }
+                else if (destinationQuery) {
+                    geocoder.geocode({ 'address': destinationQuery }, (results, status) => {
+                        if (status === 'OK') {
+                            handleDestinationFound(results[0].geometry.location, results[0].formatted_address);
+                        } else {
+                            alert('「' + destinationQuery + '」の場所が見つませんでした。理由: ' + status);
+                        }
+                    });
+                } else {
+                    alert('目的地を入力またはクリックしてください。');
+                }
+            });
+            document.getElementById('clear-route-button').addEventListener('click', clearRoute);
+            document.getElementById('destination-input').addEventListener('input', () => {
+                destinationLatLng = null;
+            });
+            
+            const trackingButton = document.getElementById('start-tracking-button');
+            trackingButton.addEventListener('click', () => {
+                // (h2.html の 2km 視点制御ロジック)
+                isTrackingMode = !isTrackingMode; 
+
+                if (isTrackingMode) {
+                    trackingButton.textContent = 'ナビ停止';
+                    trackingButton.style.backgroundColor = '#EA4335'; 
+                    map.setTilt(NAV_TILT); 
+                    
+                    if (currentLatLng) {
+                        map.setCenter(currentLatLng);
+                        map.setZoom(18); 
+                    }
+                    
+                    sliderContainer.style.display = 'block'; 
+                    sliderContainer.style.opacity = 1.0; 
+                    
+                    if (bluePolyline) bluePolyline.setMap(null); 
+                    
+                    if (routeSlider && currentLatLng && cumulativeDistances.length > 0) {
+                        const startIndex = findNearestPointOnRoute(currentLatLng, routePath);
+                        
+                        const targetDistance = cumulativeDistances[startIndex] + 2000; // 2km
+                        
+                        let endIndex = cumulativeDistances.findIndex(distance => distance >= targetDistance);
+                        if (endIndex === -1) {
+                            endIndex = routePath.length - 1;
+                        }
+                        routeSlider.set([startIndex, endIndex]); 
+                    }
+
+                } else {
+                    forceStopTracking(true); 
+                }
+            });
+        }
+        
+        function forceStopTracking(calledFromButton = false) {
+            // (h2.html と同じ)
+            if (!isTrackingMode && !calledFromButton) return; 
+
+            isTrackingMode = false;
+            
+            const trackingButton = document.getElementById('start-tracking-button');
+            trackingButton.textContent = 'ナビ開始';
+            trackingButton.style.backgroundColor = '#34A853'; 
+            
+            map.setHeading(0); 
+            map.setTilt(DEFAULT_TILT); 
+            
+            sliderContainer.style.opacity = 1.0;
+            if (routePath.length > 0) {
+                sliderContainer.style.display = 'block';
+            }
+            
+            if (bluePolyline) bluePolyline.setMap(map); 
+            
+            if (routeSlider) {
+                const fullRange = [0, routePath.length - 1];
+                routeSlider.set(fullRange); 
+                updateRouteHighlight(fullRange, true); 
+            }
+        }
+        
+        function setupSliders() {
+            // (h2.html と同じ)
+            sliderContainer = document.getElementById('route-slider-container');
+        }
+        function handleMapClick(event) {
+            // (h2.html と同じ)
+            const clickedLatLng = event.latLng;
+            destinationLatLng = clickedLatLng; 
+            if (destinationMarker) {
+                destinationMarker.setMap(null);
+            }
+            destinationMarker = new google.maps.Marker({
+                position: clickedLatLng,
+                map: map,
+                title: "目的地"
+            });
+            geocoder.geocode({ 'location': clickedLatLng }, (results, status) => {
+                if (status === 'OK' && results[0]) {
+                    document.getElementById('destination-input').value = results[0].formatted_address;
+                } else {
+                    document.getElementById('destination-input').value = `${clickedLatLng.lat()}, ${clickedLatLng.lng()}`;
+                }
+            });
+        }
+        function clearRoute() {
+            // (h2.html と同じ)
+            directionsRenderer.setDirections({routes: []}); 
+            if (destinationMarker) {
+                destinationMarker.setMap(null);
+                destinationMarker = null;
+            }
+            if (highlightPolyline) {
+                highlightPolyline.setMap(null);
+                highlightPolyline = null;
+            }
+            if (bluePolyline) {
+                bluePolyline.setMap(null);
+                bluePolyline = null;
+            }
+            document.getElementById('destination-input').value = ""; 
+            sliderContainer.style.display = 'none';
+            sliderContainer.style.opacity = 1.0;
+            document.getElementById('route-info').style.display = 'none';
+            document.getElementById('route-info').textContent = '';
+            document.getElementById('slider-info').textContent = '選択範囲: 0分0秒 (0.0 km)'; 
+            routePath = []; 
+            cumulativeDistances = [];
+            cumulativeDurations = [];
+            destinationLatLng = null; 
+            apiTotalDurationText = "";
+            apiTotalDistanceText = "";
+            if (routeSlider) {
+                routeSlider.destroy();
+                routeSlider = null;
+            }
+            isTrackingMode = false; 
+            const trackingButton = document.getElementById('start-tracking-button');
+            trackingButton.style.display = 'none';
+            trackingButton.textContent = 'ナビ開始';
+            trackingButton.style.backgroundColor = '#34A853';
+            map.setHeading(0); 
+            map.setTilt(DEFAULT_TILT); 
+        }
+        
+        function startGeolocationWatcher() {
+            // (h2.html の 2km 視点制御ロジック)
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        currentLatLng = { lat: latitude, lng: longitude };
+                        
+                        currentPositionMarker.setPosition(currentLatLng);
+
+                        if (isTrackingMode) {
+                            // --- ナビモード中の処理 ---
+                            
+                            if (routePath.length > 0 && cumulativeDistances.length > 0) {
+                                
+                                const nearestIndex = findNearestPointOnRoute(currentLatLng, routePath);
+
+                                const targetDistance = cumulativeDistances[nearestIndex] + 2000; // 2km
+                                let lookAheadIndex = cumulativeDistances.findIndex(distance => distance >= targetDistance);
+                                if (lookAheadIndex === -1) {
+                                    lookAheadIndex = routePath.length - 1;
+                                }
+
+                                if(routeSlider) {
+                                    routeSlider.set([nearestIndex, lookAheadIndex]);
+                                }
+
+                                const navSegmentPath = routePath.slice(nearestIndex, lookAheadIndex + 1);
+                                
+                                if (!highlightPolyline) { 
+                                    highlightPolyline = new google.maps.Polyline({
+                                        map: map, geodesic: true, strokeColor: '#FF0000', 
+                                        strokeOpacity: 0.7, strokeWeight: 8, zIndex: 3 
+                                    });
+                                }
+                                highlightPolyline.setPath(navSegmentPath); 
+                                if (!highlightPolyline.getMap()) {
+                                     highlightPolyline.setMap(map); 
+                                }
+
+                               // (スクリーンショット風の視点制御)
+                                const headingLookAheadIndex = Math.min(nearestIndex + 10, routePath.length - 1);
+                                map.setTilt(NAV_TILT); 
+                                map.setZoom(18); 
+
+                                if (nearestIndex < headingLookAheadIndex) {
+                                    const headingPoint = routePath[headingLookAheadIndex]; // ★この「少し先の地点」
+                                    const newHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, headingPoint);
+                                    map.setHeading(newHeading);
+                                    map.setCenter(headingPoint); // ★中心を「少し先の地点」に変更
+                                    
+                                } else {
+                                    map.setCenter(currentLatLng); // (経路終点付近のフォールバックはそのまま)
+                                }
+
+                            } else {
+                                map.setCenter(currentLatLng);
+                            }
+
+                        } else if (!directionsRenderer.getDirections()?.routes.length) {
+                            map.setCenter(currentLatLng);
+                        }
+                    },
+                    () => { alert('位置情報の取得に失敗しました。'); },
+                    { enableHighAccuracy: true } 
+                );
+            } else {
+                alert('このブラウザはGeolocationをサポートしていません。');
+            }
+        }
+
+        function findNearestPointOnRoute(currentLatLng, path) {
+            // (h2.html と同じ)
+            let minDistance = Infinity;
+            let nearestIndex = 0;
+            if (path.length === 0) return 0;
+            for (let i = 0; i < path.length; i++) {
+                const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, path[i]);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestIndex = i;
+                }
+            }
+            return nearestIndex;
+        }
+        function setupOrientationControls() {
+            // (h2.html と同じ)
+            const permissionButton = document.getElementById('enable-orientation-button');
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                permissionButton.style.display = 'block';
+                permissionButton.addEventListener('click', () => {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                window.addEventListener('deviceorientation', handleOrientation);
+                                permissionButton.style.display = 'none'; 
+                            } else {
+                                alert('コンパスの許可が拒否されました。');
+                            }
+                        })
+                        .catch(console.error);
+                });
+            } else if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', handleOrientation);
+            } else {
+                console.warn('このブラウザは DeviceOrientationEvent をサポートしていません。');
+            }
+        }
+        function handleOrientation(event) {
+            // (h2.html と同じ)
+            const heading = event.webkitCompassHeading || event.alpha; 
+            if (heading !== null && currentPositionMarker) {
+                currentPositionMarker.setIcon({
+                    ...currentPositionMarker.getIcon(),
+                    rotation: heading
+                });
+            }
+        }
+        function setupTiltControls() {
+            // (h2.html と同じ)
+            const tiltUpButton = document.getElementById('tilt-up-button');
+            const tiltDownButton = document.getElementById('tilt-down-button');
+            const TILT_STEP = 15;
+            const MAX_TILT = 85;
+            const MIN_TILT = 0;
+            tiltUpButton.addEventListener('click', () => {
+                map.setTilt(Math.min((map.getTilt() || 0) + TILT_STEP, MAX_TILT));
+            });
+            tiltDownButton.addEventListener('click', () => {
+                map.setTilt(Math.max((map.getTilt() || 0) - TILT_STEP, MIN_TILT));
+            });
+        }
+        
+        function displayRouteOnMap(start, end) {
+            // (h2.html と同じ)
+            directionsService.route({
+                origin: start,
+                destination: end, 
+                travelMode: google.maps.TravelMode.DRIVING,
+                drivingOptions: {
+                    departureTime: new Date(), 
+                    trafficModel: 'bestguess'
+                }
+            }, (result, status) => {
+                if (status === 'OK') {
+                    directionsRenderer.setDirections(result); 
+                    let detailedPath = [];
+                    cumulativeDurations = []; 
+                    cumulativeDistances = []; 
+                    const route = result.routes[0];
+                    let totalDurationSeconds = 0; 
+                    let totalDistanceMeters = 0; 
+                    if (route && route.legs && route.legs.length > 0) {
+                        const leg = route.legs[0];
+                        apiTotalDurationText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
+                        apiTotalDistanceText = leg.distance.text;
+                        const routeInfoEl = document.getElementById('route-info');
+                        routeInfoEl.textContent = `目的地まで: 約 ${apiTotalDurationText} (${apiTotalDistanceText})`;
+                        // g10 のCSSでは search-controls は display:none のまま
+                        if (document.getElementById('search-controls').style.display !== 'none') {
+                             routeInfoEl.style.display = 'block';
+                        }
+                        leg.steps.forEach(step => {
+                            const stepDuration = step.duration.value; 
+                            const stepDistance = step.distance.value; 
+                            if (step.path && step.path.length > 0) {
+                                if (detailedPath.length === 0) {
+                                    detailedPath.push(step.path[0]);
+                                    cumulativeDurations.push(0);
+                                    cumulativeDistances.push(0);
+                                }
+                                for (let i = 1; i < step.path.length; i++) {
+                                    const segmentStart = step.path[i-1];
+                                    const segmentEnd = step.path[i];
+                                    const segmentDist = google.maps.geometry.spherical.computeDistanceBetween(segmentStart, segmentEnd);
+                                    let segmentDuration = 0;
+                                    if (stepDistance > 0) {
+                                        segmentDuration = (segmentDist / stepDistance) * stepDuration;
+                                    }
+                                    totalDurationSeconds += segmentDuration;
+                                    totalDistanceMeters += segmentDist;
+                                    detailedPath.push(segmentEnd);
+                                    cumulativeDurations.push(totalDurationSeconds); 
+                                    cumulativeDistances.push(totalDistanceMeters); 
+                                }
+                            }
+                        }); 
+                        const apiTotalDuration = leg.duration_in_traffic ? leg.duration_in_traffic.value : leg.duration.value;
+                        const apiTotalDistance = leg.distance.value;
+                        if (totalDurationSeconds > 0 && totalDistanceMeters > 0) {
+                            const durationScaleFactor = apiTotalDuration / totalDurationSeconds;
+                            const distanceScaleFactor = apiTotalDistance / totalDistanceMeters;
+                            for (let i = 0; i < cumulativeDurations.length; i++) {
+                                cumulativeDurations[i] = Math.round(cumulativeDurations[i] * durationScaleFactor);
+                                cumulativeDistances[i] = Math.round(cumulativeDistances[i] * distanceScaleFactor);
+                            }
+                        }
+                        routePath = detailedPath; 
+                    } else {
+                        window.alert('経路情報の取得に失敗しました。');
+                        return;
+                    }
+
+                    if (routePath.length > 1) {
+                        bluePolyline = new google.maps.Polyline({
+                            path: routePath,
+                            geodesic: true,
+                            strokeColor: '#4285F4',
+                            strokeOpacity: 0.8,
+                            strokeWeight: 6,
+                            zIndex: 2 
+                        });
+                        bluePolyline.setMap(map);
+                        sliderContainer.style.display = 'block';
+                        const sliderElement = document.getElementById('route-slider');
+                        if (routeSlider) {
+                            routeSlider.destroy();
+                        }
+                        routeSlider = noUiSlider.create(sliderElement, {
+                            start: [0, routePath.length - 1], 
+                            connect: true, 
+                            range: { 'min': 0, 'max': routePath.length - 1 },
+                            step: 1 
+                        });
+                        
+                        routeSlider.on('start', () => {
+                            forceStopTracking(); 
+                        });
+                        
+                        routeSlider.on('change', (values) => {
+                            updateRouteHighlight(values, true); 
+                        });
+                        
+                        routeSlider.on('update', (values) => {
+                            updateRouteHighlight(values, false); 
+                        });
+
+                        updateRouteHighlight([0, routePath.length - 1], true);
+                        
+                        document.getElementById('start-tracking-button').style.display = 'inline-block';
+                    } else {
+                        window.alert('経路詳細の構築に失敗しました。');
+                    }
+                } else {
+                    window.alert('経路検索に失敗しました。理由: ' + status);
+                }
+            });
+        }
+        
+        function updateSliderInfo(values) {
+            // (h2.html と同じ)
+            if (routePath.length === 0 || cumulativeDurations.length === 0 || cumulativeDistances.length === 0) return;
+
+            const startIndex = parseInt(values[0]);
+            const endIndex = parseInt(values[1]);
+            
+            if (startIndex < 0 || endIndex >= routePath.length || startIndex > endIndex) {
+                return;
+            }
+
+            if (startIndex === 0 && endIndex === routePath.length - 1) {
+                document.getElementById('slider-info').textContent = 
+                    `選択範囲: 約 ${apiTotalDurationText} (${apiTotalDistanceText})`;
+            } else {
+                const durationSeconds = cumulativeDurations[endIndex] - cumulativeDurations[startIndex];
+                const distanceMeters = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
+                const minutes = Math.floor(durationSeconds / 60);
+                const seconds = durationSeconds % 60;
+                const kilometers = (distanceMeters / 1000).toFixed(1);
+                document.getElementById('slider-info').textContent = 
+                    `選択範囲: ${minutes}分${seconds}秒 (${kilometers} km)`;
+            }
+        }
+
+        function updateRouteHighlight(values, shouldFitBounds = true) {
+            // (h2.html と同じ)
+            
+            if (isTrackingMode) return; 
+
+            if (routePath.length === 0) return;
+
+            const startIndex = parseInt(values[0]);
+            const endIndex = parseInt(values[1]);
+            
+            if (startIndex < 0 || endIndex >= routePath.length || startIndex > endIndex) {
+                 return;
+            }
+
+            const selectedPath = routePath.slice(startIndex, endIndex + 1);
+            if (highlightPolyline) {
+                highlightPolyline.setMap(null);
+            }
+            highlightPolyline = new google.maps.Polyline({
+                path: selectedPath.length > 0 ? selectedPath : [routePath[startIndex]], 
+                geodesic: true,
+                strokeColor: '#FF0000', 
+                strokeOpacity: 0.7,
+                strokeWeight: 8,
+                zIndex: 3 
+            });
+            highlightPolyline.setMap(map);
+
+            
+            if (shouldFitBounds) { 
+                const bounds = new google.maps.LatLngBounds();
+                selectedPath.forEach(point => bounds.extend(point));
+                
+                const isPartialSelection = (startIndex > 0 || endIndex < (routePath.length - 1));
+
+                if (isPartialSelection && currentLatLng) {
+                    bounds.extend(currentLatLng); 
+                }
+                
+                if (!bounds.isEmpty()) {
+                    const currentTilt = map.getTilt();
+                    map.fitBounds(bounds, 50); 
+                    map.setTilt(currentTilt); 
+                }
+            }
+
+            updateSliderInfo(values); 
+        }
+
+    </script>
+    
+    <script async
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBZMrPm3iUtrr4f8Bzrw6yboDilUX3aZCM&callback=initMap&v=beta&libraries=marker,places,geometry">
+    </script>
+</body>
+</html>
